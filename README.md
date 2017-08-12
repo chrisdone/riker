@@ -1,10 +1,16 @@
-# riker
+# riker [![Build Status](https://travis-ci.org/chrisdone/riker.svg)](https://travis-ci.org/chrisdone/riker)
 
 Simple reverse proxy.
 
 ## Install
 
-    $ stack install
+Binary releases for Linux and OS X are available [here](https://github.com/chrisdone/riker/releases).
+
+Installing from source:
+
+1. Get [stack](https://haskell-lang.org/get-started)
+2. Run `stack install` in the repository directory.
+3. Add `~/.local/bin/` to your `PATH`.
 
 ## Running
 
