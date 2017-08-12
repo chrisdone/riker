@@ -1,0 +1,98 @@
+sudo: false
+language: c
+cache:
+  directories:
+  - "$HOME/.ghc"
+  - "$HOME/.cabal"
+  - "$HOME/.stack"
+matrix:
+  include:
+  - env: BUILD=stack ARGS=""
+    compiler: Linux
+    addons:
+      apt:
+        packages:
+        - ghc-8.0.1
+        sources:
+        - hvr-ghc
+  - env: BUILD=stack ARGS=""
+    compiler: OS X
+    os: osx
+before_install:
+- unset CC
+- CABALARGS=""
+- if [ "x$GHCVER" = "xhead" ]; then CABALARGS=--allow-newer; fi
+- export PATH=/opt/ghc/$GHCVER/bin:/opt/cabal/$CABALVER/bin:$HOME/.local/bin:/opt/alex/$ALEXVER/bin:/opt/happy/$HAPPYVER/bin:$HOME/.cabal/bin:$PATH
+- mkdir -p ~/.local/bin
+- |
+  if [ `uname` = "Darwin" ]
+  then
+    travis_retry curl --insecure -L https://www.stackage.org/stack/osx-x86_64 | tar xz --strip-components=1 --include '*/stack' -C ~/.local/bin
+  else
+    travis_retry curl -L https://www.stackage.org/stack/linux-x86_64 | tar xz --wildcards --strip-components=1 -C ~/.local/bin '*/stack'
+  fi
+
+  # Use the more reliable S3 mirror of Hackage
+  mkdir -p $HOME/.cabal
+  echo 'remote-repo: hackage.haskell.org:http://hackage.fpcomplete.com/' > $HOME/.cabal/config
+  echo 'remote-repo-cache: $HOME/.cabal/packages' >> $HOME/.cabal/config
+
+  if [ "$CABALVER" != "1.16" ]
+  then
+    echo 'jobs: $ncpus' >> $HOME/.cabal/config
+  fi
+- PACKAGES=$(stack --install-ghc query locals | grep '^ *path' | sed 's@^ *path:@@')
+install:
+- echo "$(ghc --version) [$(ghc --print-project-git-commit-id 2> /dev/null || echo
+  '?')]"
+- if [ -f configure.ac ]; then autoreconf -i; fi
+- |
+  set -ex
+  case "$BUILD" in
+    stack)
+      stack build --no-terminal --test --copy-bins --only-dependencies
+      ;;
+    cabal)
+      cabal --version
+      travis_retry cabal update
+      cabal install --only-dependencies --enable-tests --enable-benchmarks --force-reinstalls --ghc-options=-O0 --reorder-goals --max-backjumps=-1 $CABALARGS $PACKAGES
+      ;;
+  esac
+  set +ex
+script:
+- |
+  set -ex
+  case "$BUILD" in
+    stack)
+      stack build --no-terminal --test --copy-bins
+      mkdir -p releases/
+      pwd
+      cp ~/.local/bin/riker releases/riker-$TRAVIS_OS_NAME
+      strip releases/riker-$TRAVIS_OS_NAME
+      ;;
+    cabal)
+      cabal install --enable-tests --enable-benchmarks --force-reinstalls --ghc-options=-O0 --reorder-goals --max-backjumps=-1 $CABALARGS $PACKAGES
+
+      ORIGDIR=$(pwd)
+      for dir in $PACKAGES
+      do
+        cd $dir
+        cabal check || [ "$CABALVER" == "1.16" ]
+        cabal sdist
+        SRC_TGZ=$(cabal info . | awk '{print $2;exit}').tar.gz && \
+          (cd dist && cabal install --force-reinstalls "$SRC_TGZ")
+        cd $ORIGDIR
+      done
+      ;;
+  esac
+  set +ex
+deploy:
+  provider: releases
+  api_key:
+    secure: dLLTuDWO5/uxXikOQHT03vsWvTplotRgL7RLtkTV8uv4FXhDibSXJMCFhFCc+QU57vd70lLilFSrPLJywQA5WQfUz56fb/06JR7LWnHU85iedNDxFLCekZR0zQWXhw9jhd5LOVXUm8QCg9PYMSPMABDatec5EJ+sK8rHkKVLr6GPK2JifemC403JoCZuSrrOYo7Y68TX/Un6EQTdGXlnfVF5s0ZHw3mJOF1pd1gfxAjRpB5UHIWpseant+IpZEAIIdXZW6CGn4FPiz3MDKZot1IluqbEKGC0ZukOc7TeSXrsRd19OM+ViEZGcikVCm2/Z6deG5Zbtn+aW6CoKXvpnNu211yZJbVzp9rJ+wZoaieMv5lQVPyMq6u3p0ayg9B6/tUak0GSkUszR8X90ZI8XfLUGhilBYrPrL9SpSbxmaOAcLR1OKzK6nlM8jN+GJTGEGv4CAWv6SbU1ukn7Vqt9oAu7K7wXrosara0ObzSd39CbyOnWUa8sy8GgRO/XnUcC1TyCWgSocdqY+Y9OShdwnKzPWVvYKTyz0wwHyPWdDvxIqsfqOYsgyTSWuIR923JHddhUrVEjSS4ED67BpWvizoKBNYSfzHfv7bBALvV0v6awFEK8UsqWtPMFDbtXuAfduJ39oxCoZrVybNwJTilywMWm19pGC1q5eqfurBDvNU=
+  file: "releases/*"
+  file_glob: true
+  on:
+    repo: chrisdone/riker
+    tags: true
+  skip_cleanup: true
